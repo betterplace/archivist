@@ -12,7 +12,7 @@ module Archivist
     def self.included(base)
       base.extend ClassMethods
     end
-    
+
     module ClassMethods
       def has_archive(options={})
         options = ARCHIVIST_DEFAULTS.merge(options)
@@ -48,7 +48,7 @@ module Archivist
             self.primary_key = "#{self.primary_key}"
             include Archivist::ArchiveMethods
           end
-          
+
           #{build_copy_self_to_archive(options[:allow_multiple_archives])}
         },File.expand_path(__FILE__),21)
 
@@ -132,11 +132,11 @@ module Archivist
         "yield(archived) if block_given?
         archived.save"
       end
-      
+
       private :include_modules!,:attach_serializations!, :build_associations!,
               :archive_for,:build_copy_self_to_archive,:yield_and_save
     end
-    
+
     module InstanceMethods #these defs can't happen untill after we've aliased their respective originals
 
       def delete
@@ -145,15 +145,17 @@ module Archivist
         @destroyed = true
         freeze
       end
-      
+
       def destroy
-        _run_destroy_callbacks do
-          self.delete
+        with_transaction_returning_status do
+          _run_destroy_callbacks do
+            self.delete
+          end
         end
       end
-      
+
       def destroy!
-        transaction do
+        with_transaction_returning_status do
           _run_destroy_callbacks do
             self.delete!
           end
@@ -161,17 +163,18 @@ module Archivist
       end
     end
 
+
     module ClassExtensions #these can't get included in the class def until after all aliases are done
       def copy_to_archive(conditions,delete=true,&block)
         where = sanitize_sql(conditions)
         found = self.where(where)
-        
+
         found.each do |m|
           result = m.copy_self_to_archive(&block)
           m.destroy! if delete && result
         end
       end
-      
+
       def copy_from_archive(conditions,delete=true)
         where = sanitize_sql(conditions)
         where = where.gsub("#{table_name}","archived_#{table_name}") unless where.nil? || where =~ /archived/
@@ -185,18 +188,18 @@ module Archivist
           self.transaction do
             my_attribute_names = self.new.attribute_names
             #this should be Hash.select but 1.8.7 returns an array from select but a hash from reject... dumb
-            attrs = m.attributes.reject{|k,v| !my_attribute_names.include?(k.to_s)} 
+            attrs = m.attributes.reject{|k,v| !my_attribute_names.include?(k.to_s)}
 
             if self.where(:id=>m.id).empty?
               new_m = self.create(attrs)
-              connection.execute(%Q{UPDATE #{table_name} 
-                                    SET #{self.primary_key} = #{m.id} 
+              connection.execute(%Q{UPDATE #{table_name}
+                                    SET #{self.primary_key} = #{m.id}
                                     WHERE #{self.primary_key} = #{new_m.id}
                                    })
             else
               self.where(:id=>m.id).first.update_attributes(attrs)
             end
-            m.destroy if delete  
+            m.destroy if delete
           end
         end
       end
